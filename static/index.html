@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LogSentinel: Lightweight SIEM</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        dark: {
+                            bg: '#0f172a',
+                            panel: '#1e293b',
+                            border: '#334155'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-dark-bg text-gray-200 font-sans min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-6xl">
+        <!-- Header -->
+        <header class="mb-8 flex items-center justify-between border-b border-dark-border pb-4">
+            <div>
+                <h1 class="text-3xl font-bold text-white flex items-center gap-2">
+                    <svg class="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                    LogSentinel
+                </h1>
+                <p class="text-gray-400 mt-1">Lightweight SIEM & Threat Analyzer</p>
+            </div>
+            <button onclick="fetchData()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow transition">
+                Refresh Data
+            </button>
+        </header>
+
+        <!-- Metrics Row -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-dark-panel p-6 rounded-lg border border-dark-border shadow-lg">
+                <h3 class="text-gray-400 text-sm font-medium uppercase tracking-wider mb-2">Total Logs Scanned</h3>
+                <p id="totalLogs" class="text-4xl font-bold text-white">0</p>
+            </div>
+            <div class="bg-dark-panel p-6 rounded-lg border border-dark-border shadow-lg">
+                <h3 class="text-gray-400 text-sm font-medium uppercase tracking-wider mb-2">Total Threats Detected</h3>
+                <p id="totalThreats" class="text-4xl font-bold text-red-500">0</p>
+            </div>
+            <div class="bg-dark-panel p-6 rounded-lg border border-dark-border shadow-lg">
+                <h3 class="text-gray-400 text-sm font-medium uppercase tracking-wider mb-2">High Severity Alerts</h3>
+                <p id="highSeverity" class="text-4xl font-bold text-orange-500">0</p>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            <!-- Chart -->
+            <div class="bg-dark-panel p-6 rounded-lg border border-dark-border shadow-lg lg:col-span-1">
+                <h3 class="text-lg font-semibold text-white mb-4">Threat Distribution</h3>
+                <div class="relative h-64">
+                    <canvas id="threatChart"></canvas>
+                </div>
+            </div>
+            
+            <!-- Alert Feed -->
+            <div class="bg-dark-panel p-6 rounded-lg border border-dark-border shadow-lg lg:col-span-2 flex flex-col">
+                <h3 class="text-lg font-semibold text-white mb-4">Live Alert Feed</h3>
+                <div class="overflow-y-auto flex-1 h-64 border border-dark-border rounded">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-gray-800 sticky top-0">
+                            <tr>
+                                <th class="px-4 py-3 font-medium text-gray-300">Timestamp</th>
+                                <th class="px-4 py-3 font-medium text-gray-300">IP Address</th>
+                                <th class="px-4 py-3 font-medium text-gray-300">Type</th>
+                                <th class="px-4 py-3 font-medium text-gray-300">Endpoint</th>
+                                <th class="px-4 py-3 font-medium text-gray-300">Severity</th>
+                            </tr>
+                        </thead>
+                        <tbody id="alertTableBody" class="divide-y divide-dark-border">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let threatChart = null;
+
+        function getSeverityBadge(severity) {
+            const classes = {
+                'High': 'bg-red-900/50 text-red-400 border-red-800',
+                'Medium': 'bg-orange-900/50 text-orange-400 border-orange-800',
+                'Low': 'bg-yellow-900/50 text-yellow-400 border-yellow-800'
+            };
+            const cls = classes[severity] || 'bg-gray-800 text-gray-400 border-gray-700';
+            return `<span class="px-2 py-1 rounded text-xs border ${cls}">${severity}</span>`;
+        }
+
+        async function fetchData() {
+            try {
+                const [statsRes, alertsRes] = await Promise.all([
+                    fetch('/api/stats'),
+                    fetch('/api/alerts')
+                ]);
+                
+                const stats = await statsRes.json();
+                const alerts = await alertsRes.json();
+
+                // Update Metrics
+                document.getElementById('totalLogs').textContent = stats.total_logs;
+                document.getElementById('totalThreats').textContent = stats.total_threats;
+                
+                const highCount = alerts.filter(a => a.severity === 'High').length;
+                document.getElementById('highSeverity').textContent = highCount;
+
+                // Update Chart
+                const labels = Object.keys(stats.threat_types);
+                const data = Object.values(stats.threat_types);
+                
+                if (threatChart) {
+                    threatChart.data.labels = labels;
+                    threatChart.data.datasets[0].data = data;
+                    threatChart.update();
+                } else {
+                    const ctx = document.getElementById('threatChart').getContext('2d');
+                    threatChart = new Chart(ctx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                data: data,
+                                backgroundColor: [
+                                    '#ef4444', // red
+                                    '#f97316', // orange
+                                    '#eab308', // yellow
+                                    '#3b82f6'  // blue
+                                ],
+                                borderWidth: 0
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    position: 'bottom',
+                                    labels: { color: '#cbd5e1' }
+                                }
+                            }
+                        }
+                    });
+                }
+
+                // Update Table
+                const tbody = document.getElementById('alertTableBody');
+                tbody.innerHTML = '';
+                
+                if (alerts.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-8 text-center text-gray-500">No threats detected.</td></tr>`;
+                } else {
+                    alerts.forEach(alert => {
+                        const tr = document.createElement('tr');
+                        tr.className = 'hover:bg-gray-800/50 transition';
+                        tr.innerHTML = `
+                            <td class="px-4 py-3 text-gray-400 whitespace-nowrap">${alert.timestamp}</td>
+                            <td class="px-4 py-3 font-mono text-blue-400">${alert.ip}</td>
+                            <td class="px-4 py-3 font-semibold text-gray-300">${alert.type}</td>
+                            <td class="px-4 py-3 font-mono text-gray-500 truncate max-w-[200px]" title="${alert.endpoint}">${alert.endpoint}</td>
+                            <td class="px-4 py-3">${getSeverityBadge(alert.severity)}</td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                }
+
+            } catch (error) {
+                console.error("Error fetching data:", error);
+            }
+        }
+
+        // Initial load
+        document.addEventListener('DOMContentLoaded', fetchData);
+    </script>
+</body>
+</html>
