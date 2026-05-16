@@ -3,8 +3,15 @@ from fastapi import FastAPI
 # pyrefly: ignore [missing-import]
 from fastapi.staticfiles import StaticFiles
 from analyzer import analyze_logs
+from generate_logs import generate_logs
+import os
 
 app = FastAPI(title="LogSentinel API")
+
+@app.on_event("startup")
+def startup_event():
+    if not os.path.exists("access.log"):
+        generate_logs()
 
 # API Endpoints
 @app.get("/api/stats")
